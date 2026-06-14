@@ -93,3 +93,37 @@ class TestFortumPriceSensor:
         )
 
         assert sensor.native_unit_of_measurement == "SEK/kWh"
+
+    def test_extra_state_attributes_split_average_price(
+        self, sensor, mock_coordinator
+    ):
+        """Test split_average_price attribute is exposed."""
+        config_entry = Mock()
+        config_entry.options = {"split_average_price": True}
+        mock_coordinator.config_entry = config_entry
+
+        attrs = sensor.extra_state_attributes
+        assert attrs["split_average_price"] is True
+
+        config_entry.options = {"split_average_price": False}
+        attrs = sensor.extra_state_attributes
+        assert attrs["split_average_price"] is False
+
+    def test_extra_state_attributes_forecast(self, sensor, mock_coordinator):
+        """Test forecast attribute is exposed and matches price points."""
+        config_entry = Mock()
+        config_entry.options = {"split_average_price": False}
+        mock_coordinator.config_entry = config_entry
+
+        attrs = sensor.extra_state_attributes
+        assert attrs is not None
+        forecast = attrs["forecast"]
+        assert len(forecast) == 2
+        assert forecast[0] == {
+            "date_time": "2026-03-10T12:00:00",
+            "price": 0.119,
+        }
+        assert forecast[1] == {
+            "date_time": "2026-03-11T12:00:00",
+            "price": 0.125,
+        }

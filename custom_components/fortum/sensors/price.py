@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 
-from ..const import PRICE_SENSOR_KEY, get_currency_for_region
+from ..const import CONF_SPLIT_AVERAGE_PRICE, PRICE_SENSOR_KEY, get_currency_for_region
 
 if TYPE_CHECKING:
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -118,11 +118,26 @@ class FortumPriceSensor(FortumEntity, SensorEntity):
             else datetime.now()
         )
 
+        config_entry = self.coordinator.config_entry
+        split_average_price = (
+            config_entry.options.get(CONF_SPLIT_AVERAGE_PRICE, False)
+            if config_entry is not None
+            else False
+        )
+
         return {
             "price_area": self._area_code,
             "total_records_with_price": len(price_points),
             "latest_date": latest_date.isoformat(),
             "has_future_price": latest_date > now,
+            "split_average_price": split_average_price,
+            "forecast": [
+                {
+                    "date_time": p.date_time.isoformat(),
+                    "price": p.price,
+                }
+                for p in price_points
+            ],
         }
 
 
