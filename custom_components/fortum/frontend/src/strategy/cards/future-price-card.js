@@ -520,7 +520,13 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
       return;
     }
     const hidden = this._hiddenSeriesIds || new Set();
-    const visible = this._allSeries.filter((entry) => !hidden.has(entry.id));
+    const visible = this._allSeries.filter((entry) => {
+      if (entry.id.startsWith("avg-")) {
+        const parentId = entry.id.replace(/^avg-(today-|tomorrow-|overall-)/, "");
+        return !hidden.has(parentId);
+      }
+      return !hidden.has(entry.id);
+    });
     const emptyEl = this.shadowRoot?.querySelector("#empty");
     if (emptyEl) {
       emptyEl.style.display = visible.some((entry) => entry.data?.length) ? "none" : "block";
@@ -946,6 +952,9 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
           }
         });
 
+        const avg = pointValues.length
+          ? pointValues.reduce((acc, v) => acc + v, 0) / pointValues.length
+          : 0;
         const avgToday = todayValues.length
           ? todayValues.reduce((acc, v) => acc + v, 0) / todayValues.length
           : 0;
@@ -972,15 +981,78 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
           },
           data: points,
         });
+
+        if (this._splitAveragePrice === true) {
+          series.push({
+            id: `avg-today-${seriesId}`,
+            name: `${seriesName} Today Average`,
+            type: "line",
+            symbol: "none",
+            showSymbol: false,
+            silent: true,
+            yAxisIndex: 0,
+            z: 9,
+            lineStyle: {
+              width: 1.5,
+              type: "dotted",
+              color,
+            },
+            data: [
+              [this._rangeStartMs, avgToday],
+              [this._tomorrowStartMs - 1, avgToday],
+            ],
+          });
+
+          if (avgTomorrow !== null && tomorrowValues.length > 0) {
+            series.push({
+              id: `avg-tomorrow-${seriesId}`,
+              name: `${seriesName} Tomorrow Average`,
+              type: "line",
+              symbol: "none",
+              showSymbol: false,
+              silent: true,
+              yAxisIndex: 0,
+              z: 9,
+              lineStyle: {
+                width: 1.5,
+                type: "dotted",
+                color,
+              },
+              data: [
+                [this._tomorrowStartMs, avgTomorrow],
+                [this._rangeEndMs, avgTomorrow],
+              ],
+            });
+          }
+        } else {
+          series.push({
+            id: `avg-overall-${seriesId}`,
+            name: `${seriesName} Average`,
+            type: "line",
+            symbol: "none",
+            showSymbol: false,
+            silent: true,
+            yAxisIndex: 0,
+            z: 9,
+            lineStyle: {
+              width: 1.5,
+              type: "dotted",
+              color,
+            },
+            data: [
+              [this._rangeStartMs, avg],
+              [this._rangeEndMs, avg],
+            ],
+          });
+        }
+
         legendRows.push({
           id: seriesId,
           name: seriesName,
           color,
           min: pointValues.length ? Math.min(...pointValues) : 0,
           max: pointValues.length ? Math.max(...pointValues) : 0,
-          avg: pointValues.length
-            ? pointValues.reduce((acc, v) => acc + v, 0) / pointValues.length
-            : 0,
+          avg,
           avgToday,
           avgTomorrow,
           now: this._getNowForecastValue(points),
@@ -1038,7 +1110,7 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
           const ts = Array.isArray(rows[0].value) ? rows[0].value[0] : rows[0].value;
           const title = this._formatClock(Number(ts));
           const rowData = rows
-            .filter((row) => Array.isArray(row.value))
+            .filter((row) => Array.isArray(row.value) && !row.seriesId.startsWith("avg-"))
             .map((row) => {
               const value = Number(row.value[1]);
               return {
