@@ -957,14 +957,14 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
           id: seriesId,
           name: seriesName,
           type: "line",
-          smooth: 0.05,
+          step: "end",
           symbol: "none",
           showSymbol: false,
           yAxisIndex: 0,
           z: 10,
           lineStyle: {
             width: 2,
-            type: "dashed",
+            type: "solid",
             color,
           },
           itemStyle: {
