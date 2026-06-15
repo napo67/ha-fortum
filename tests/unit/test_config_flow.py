@@ -22,11 +22,13 @@ from custom_components.fortum.const import (
     CONF_DEBUG_LOGGING,
     CONF_FORCE_SHORT_TOKEN_LIFETIME,
     CONF_REGION,
+    CONF_SPLIT_AVERAGE_PRICE,
     DEFAULT_CREATE_CURRENT_MONTH_SENSORS,
     DEFAULT_CREATE_DASHBOARD,
     DEFAULT_DEBUG_ENTITIES,
     DEFAULT_DEBUG_LOGGING,
     DEFAULT_FORCE_SHORT_TOKEN_LIFETIME,
+    DEFAULT_SPLIT_AVERAGE_PRICE,
 )
 from custom_components.fortum.exceptions import AuthenticationError, FortumError
 
@@ -85,6 +87,7 @@ class TestFortumConfigFlow:
             CONF_DEBUG_ENTITIES: True,
             CONF_DEBUG_LOGGING: True,
             CONF_FORCE_SHORT_TOKEN_LIFETIME: True,
+            CONF_SPLIT_AVERAGE_PRICE: False,
         }
 
     @patch("custom_components.fortum.config_flow.validate_input")
@@ -109,6 +112,7 @@ class TestFortumConfigFlow:
             CONF_DEBUG_ENTITIES: DEFAULT_DEBUG_ENTITIES,
             CONF_DEBUG_LOGGING: DEFAULT_DEBUG_LOGGING,
             CONF_FORCE_SHORT_TOKEN_LIFETIME: DEFAULT_FORCE_SHORT_TOKEN_LIFETIME,
+            CONF_SPLIT_AVERAGE_PRICE: DEFAULT_SPLIT_AVERAGE_PRICE,
         }
 
     @patch("custom_components.fortum.config_flow.validate_input")
@@ -297,5 +301,6 @@ class TestFortumOptionsFlow:
             CONF_DEBUG_ENTITIES: True,
             CONF_DEBUG_LOGGING: True,
             CONF_FORCE_SHORT_TOKEN_LIFETIME: True,
+            CONF_SPLIT_AVERAGE_PRICE: DEFAULT_SPLIT_AVERAGE_PRICE,
         }
         flow.hass.config_entries.async_update_entry.assert_called_once()
