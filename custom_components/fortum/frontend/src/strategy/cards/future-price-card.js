@@ -966,6 +966,16 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
         // Split data into today and tomorrow series for independent coloring
         const todayPoints = points.filter((pt) => Number(pt[0]) < this._tomorrowStartMs);
         const tomorrowPoints = points.filter((pt) => Number(pt[0]) >= this._tomorrowStartMs);
+
+        // Today series - extend to start of tomorrow (00:00 tomorrow)
+        const extendedTodayPoints = [...todayPoints];
+        if (extendedTodayPoints.length) {
+          extendedTodayPoints.push([
+            this._tomorrowStartMs,
+            extendedTodayPoints[extendedTodayPoints.length - 1][1],
+          ]);
+        }
+
         // Today series
         const todaySeriesId = `${seriesId}-today`;
         series.push({
@@ -978,11 +988,17 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
           yAxisIndex: 0,
           z: 10,
           lineStyle: { width: 2, type: "solid" },
-          data: [...todayPoints],
+          data: extendedTodayPoints,
         });
-        // Tomorrow series (if any data)
+
+        // Tomorrow series (if any data) - extend to the end of the range (end of tomorrow)
         const tomorrowSeriesId = `${seriesId}-tomorrow`;
         if (tomorrowPoints.length) {
+          const extendedTomorrowPoints = [...tomorrowPoints];
+          extendedTomorrowPoints.push([
+            this._rangeEndMs,
+            extendedTomorrowPoints[extendedTomorrowPoints.length - 1][1],
+          ]);
           series.push({
             id: tomorrowSeriesId,
             name: `${seriesName} Tomorrow`,
@@ -993,7 +1009,7 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
             yAxisIndex: 0,
             z: 10,
             lineStyle: { width: 2, type: "solid" },
-            data: [...tomorrowPoints],
+            data: extendedTomorrowPoints,
           });
         }
 
