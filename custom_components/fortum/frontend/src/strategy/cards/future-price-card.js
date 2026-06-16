@@ -928,6 +928,7 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
       const series = [];
       const legendRows = [];
       const values = [];
+      const visualMaps = [];
       forecastIds.forEach((statId, index) => {
         const points = pointsByStatId[statId] || [];
         const color = this._getPriceForecastColor(index);
@@ -962,30 +963,87 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
           ? tomorrowValues.reduce((acc, v) => acc + v, 0) / tomorrowValues.length
           : null;
 
+        // Split data into today and tomorrow series for independent coloring
+        const todayPoints = points.filter((pt) => Number(pt[0]) < this._tomorrowStartMs);
+        const tomorrowPoints = points.filter((pt) => Number(pt[0]) >= this._tomorrowStartMs);
+        // Today series
+        const todaySeriesId = `${seriesId}-today`;
         series.push({
-          id: seriesId,
-          name: seriesName,
+          id: todaySeriesId,
+          name: `${seriesName} Today`,
           type: "line",
           step: "end",
           symbol: "none",
           showSymbol: false,
           yAxisIndex: 0,
           z: 10,
-          lineStyle: {
-            width: 2,
-            type: "solid",
-            color,
-          },
-          itemStyle: {
-            color,
-          },
-          data: [
-            ...points,
-            ...(points.length
-              ? [[this._rangeEndMs, points[points.length - 1][1]]]
-              : []),
-          ],
+          lineStyle: { width: 2, type: "solid" },
+          data: [...todayPoints],
         });
+        // Tomorrow series (if any data)
+        const tomorrowSeriesId = `${seriesId}-tomorrow`;
+        if (tomorrowPoints.length) {
+          series.push({
+            id: tomorrowSeriesId,
+            name: `${seriesName} Tomorrow`,
+            type: "line",
+            step: "end",
+            symbol: "none",
+            showSymbol: false,
+            yAxisIndex: 0,
+            z: 10,
+            lineStyle: { width: 2, type: "solid" },
+            data: [...tomorrowPoints],
+          });
+        }
+
+        // Determine series indices for today and tomorrow
+        const todaySeriesIndex = series.findIndex(s => s.id === `${seriesId}-today`);
+        const tomorrowSeriesIndex = series.findIndex(s => s.id === `${seriesId}-tomorrow`);
+        // VisualMap for today series using appropriate threshold
+        if (todaySeriesIndex !== -1 && pointValues.length > 0) {
+          const threshold = this._splitAveragePrice === true ? avgToday : avg;
+          const maxPrice = Math.max(...pointValues);
+          if (maxPrice > threshold) {
+            const pieces = [{ gt: -Infinity, lte: threshold, color: "#16a34a" }];
+            const steps = 10;
+            const startRGB = [245, 158, 11];
+            const endRGB = [239, 68, 68];
+            for (let i = 0; i < steps; i++) {
+              const r = Math.round(startRGB[0] + (endRGB[0] - startRGB[0]) * (i / (steps - 1)));
+              const g = Math.round(startRGB[1] + (endRGB[1] - startRGB[1]) * (i / (steps - 1)));
+              const b = Math.round(startRGB[2] + (endRGB[2] - startRGB[2]) * (i / (steps - 1)));
+              const gt = threshold + ((maxPrice - threshold) * i) / steps;
+              const lte = i === steps - 1 ? Infinity : threshold + ((maxPrice - threshold) * (i + 1)) / steps;
+              pieces.push({ gt, lte, color: `rgb(${r},${g},${b})` });
+            }
+            visualMaps.push({ show: false, dimension: 1, seriesIndex: todaySeriesIndex, pieces });
+          } else {
+            visualMaps.push({ show: false, dimension: 1, seriesIndex: todaySeriesIndex, pieces: [{ gt: -Infinity, lte: Infinity, color: "#16a34a" }] });
+          }
+        }
+        // VisualMap for tomorrow series using appropriate threshold (if present)
+        if (tomorrowSeriesIndex !== -1 && tomorrowValues.length > 0) {
+          const threshold = (this._splitAveragePrice === true && avgTomorrow !== null) ? avgTomorrow : avg;
+          const maxPrice = Math.max(...pointValues);
+          if (maxPrice > threshold) {
+            const pieces = [{ gt: -Infinity, lte: threshold, color: "#16a34a" }];
+            const steps = 10;
+            const startRGB = [245, 158, 11];
+            const endRGB = [239, 68, 68];
+            for (let i = 0; i < steps; i++) {
+              const r = Math.round(startRGB[0] + (endRGB[0] - startRGB[0]) * (i / (steps - 1)));
+              const g = Math.round(startRGB[1] + (endRGB[1] - startRGB[1]) * (i / (steps - 1)));
+              const b = Math.round(startRGB[2] + (endRGB[2] - startRGB[2]) * (i / (steps - 1)));
+              const gt = threshold + ((maxPrice - threshold) * i) / steps;
+              const lte = i === steps - 1 ? Infinity : threshold + ((maxPrice - threshold) * (i + 1)) / steps;
+              pieces.push({ gt, lte, color: `rgb(${r},${g},${b})` });
+            }
+            visualMaps.push({ show: false, dimension: 1, seriesIndex: tomorrowSeriesIndex, pieces });
+          } else {
+            visualMaps.push({ show: false, dimension: 1, seriesIndex: tomorrowSeriesIndex, pieces: [{ gt: -Infinity, lte: Infinity, color: "#16a34a" }] });
+          }
+        }
 
         if (this._splitAveragePrice === true) {
           series.push({
@@ -1104,6 +1162,7 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
           },
         },
       ],
+      visualMap: visualMaps,
       tooltip: {
         show: true,
         trigger: "axis",
