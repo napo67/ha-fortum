@@ -15,6 +15,7 @@ show_help() {
     echo "Options:"
     echo "  -a, --all      Copy all integration files (excluding node_modules, src, __pycache__, etc.)"
     echo "  -r, --ref REF  Copy files changed in the specified git reference/commit (e.g. HEAD~1, a1b2c3d)"
+    echo "  -t, --test     Show operations that would be executed without performing them"
     echo "  -h, --help     Show this help message"
     echo
     echo "If no options are provided, the script copies files modified in git status,"
@@ -23,9 +24,10 @@ show_help() {
 
 MODE="default"
 GIT_REF=""
+TEST_MODE=false
 
 # Parse options using GNU getopt
-TEMP=$(getopt -o ahr: --long all,help,ref: -n 'copy_to_ha.sh' -- "$@")
+TEMP=$(getopt -o ahtr: --long all,help,ref:,test -n "$(basename "$0")" -- "$@")
 if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
 
 eval set -- "$TEMP"
@@ -40,6 +42,10 @@ while true ; do
             MODE="git-ref"
             GIT_REF="$2"
             shift 2
+            ;;
+        -t|--test)
+            TEST_MODE=true
+            shift
             ;;
         -h|--help)
             show_help
@@ -123,19 +129,74 @@ for FILE in $PARSED_FILES; do
     REMOTE_FILE="${TARGET_DIR}/${REL_PATH}"
     REMOTE_DIR=$(dirname "${REMOTE_FILE}")
     
-    # 1. Ensure remote directory exists
-    # shellcheck disable=SC2029
-    ssh "${USER}@${HOST}" "mkdir -p '${REMOTE_DIR}'"
-    
-    # 2. Check if a backup (.orig) exists. If not, copy the existing file to .orig on the remote host
-    echo "Checking backup for ${REL_PATH} on Home Assistant..."
-    # shellcheck disable=SC2029
-    ssh "${USER}@${HOST}" "[ ! -f '${REMOTE_FILE}.orig' ] && [ -f '${REMOTE_FILE}' ] && cp '${REMOTE_FILE}' '${REMOTE_FILE}.orig' || true"
-    
-    # 3. Transfer the file
-    echo "Transferring: ${FILE} -> ${REMOTE_FILE}"
-    scp "${FILE}" "${USER}@${HOST}:${REMOTE_FILE}"
+    # Calculate local SHA-256 hash
+    LOCAL_SHA=$(sha256sum "${FILE}" | cut -d' ' -f1)
+
+    # Get remote file existence, remote hash, and .orig presence in one SSH command
+    echo "Checking remote status for ${REL_PATH} on Home Assistant..."
+    REMOTE_STATE=$(ssh "${USER}@${HOST}" "
+        if [ -f '${REMOTE_FILE}' ]; then
+            echo -n 'EXISTS '
+            sha256sum '${REMOTE_FILE}' 2>/dev/null | cut -d' ' -f1 || echo 'HASH_ERROR'
+        else
+            echo 'NOT_EXISTS'
+        fi
+        if [ -f '${REMOTE_FILE}.orig' ]; then
+            echo 'ORIG_EXISTS'
+        else
+            echo 'ORIG_NOT_EXISTS'
+        fi
+    " 2>/dev/null || echo "SSH_FAILED")
+
+    if [ "$REMOTE_STATE" = "SSH_FAILED" ] || [ -z "$REMOTE_STATE" ]; then
+        echo "Error: Failed to connect to Home Assistant or retrieve remote status for ${REL_PATH}." >&2
+        exit 1
+    fi
+
+    # Parse remote state
+    REMOTE_INFO=$(echo "$REMOTE_STATE" | head -n 1)
+    ORIG_STATUS=$(echo "$REMOTE_STATE" | tail -n 1)
+    REMOTE_STATUS=$(echo "$REMOTE_INFO" | cut -d' ' -f1)
+    REMOTE_SHA=$(echo "$REMOTE_INFO" | cut -d' ' -f2)
+
+    # Check if we need to copy
+    NEEDS_COPY=false
+    if [ "$REMOTE_STATUS" != "EXISTS" ]; then
+        echo "${REL_PATH} does not exist on target."
+        NEEDS_COPY=true
+    elif [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+        echo "${REL_PATH} is different (local: ${LOCAL_SHA:0:8}, remote: ${REMOTE_SHA:0:8})."
+        NEEDS_COPY=true
+    else
+        echo "${REL_PATH} is identical. Skipping copy."
+    fi
+
+    if [ "$NEEDS_COPY" = "true" ]; then
+        # Check if we need to backup
+        if [ "$REMOTE_STATUS" = "EXISTS" ] && [ "$ORIG_STATUS" = "ORIG_NOT_EXISTS" ]; then
+            if [ "$TEST_MODE" = "true" ]; then
+                echo "[TEST] Would backup original file: ${REMOTE_FILE} -> ${REMOTE_FILE}.orig"
+            else
+                echo "Backing up original file on target: ${REMOTE_FILE} -> ${REMOTE_FILE}.orig"
+                ssh "${USER}@${HOST}" "cp '${REMOTE_FILE}' '${REMOTE_FILE}.orig'"
+            fi
+        fi
+
+        # Transfer the file
+        if [ "$TEST_MODE" = "true" ]; then
+            echo "[TEST] Would ensure directory exists: ${REMOTE_DIR}"
+            echo "[TEST] Would transfer: ${FILE} -> ${REMOTE_FILE}"
+        else
+            echo "Transferring: ${FILE} -> ${REMOTE_FILE}"
+            ssh "${USER}@${HOST}" "mkdir -p '${REMOTE_DIR}'"
+            scp "${FILE}" "${USER}@${HOST}:${REMOTE_FILE}"
+        fi
+    fi
 done
 
 echo "----------------------------------------"
-echo "Copy complete! Remember to restart Home Assistant and clear your browser cache."
+if [ "$TEST_MODE" = "true" ]; then
+    echo "Test run complete! The operations above show what would be done."
+else
+    echo "Copy complete! Remember to restart Home Assistant and clear your browser cache."
+fi
