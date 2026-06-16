@@ -979,7 +979,12 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
           itemStyle: {
             color,
           },
-          data: points,
+          data: [
+            ...points,
+            ...(points.length
+              ? [[this._rangeEndMs, points[points.length - 1][1]]]
+              : []),
+          ],
         });
 
         if (this._splitAveragePrice === true) {
