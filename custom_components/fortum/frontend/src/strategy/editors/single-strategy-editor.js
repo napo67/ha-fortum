@@ -66,20 +66,8 @@ export class FortumEnergySingleStrategyEditor extends HTMLElement {
     if (!oldHass) {
       return true;
     }
-    const oldPoints = listDiscoverableMeteringPoints(oldHass);
-    const newPoints = listDiscoverableMeteringPoints(newHass);
-    if (oldPoints.length !== newPoints.length) {
-      return true;
-    }
-    for (let i = 0; i < oldPoints.length; i++) {
-      if (
-        oldPoints[i].number !== newPoints[i].number ||
-        oldPoints[i].address !== newPoints[i].address
-      ) {
-        return true;
-      }
-    }
-    return false;
+    return JSON.stringify(listDiscoverableMeteringPoints(oldHass)) !==
+      JSON.stringify(listDiscoverableMeteringPoints(newHass));
   }
 
   get hass() {
@@ -525,13 +513,13 @@ export class FortumEnergySingleStrategyEditor extends HTMLElement {
     if (!this._state) {
       return;
     }
+    this._skipNextRender = true;
     const target = event.currentTarget;
     const field = target?.dataset?.field;
     const value = event?.detail?.value;
 
     if (field === "temperature_stat") {
       this._state.meteringPointTemperature = typeof value === "string" ? value : "";
-      this._skipNextRender = true;
       this._validateAndEmit();
       return;
     }
@@ -545,7 +533,6 @@ export class FortumEnergySingleStrategyEditor extends HTMLElement {
       stat: typeof value === "string" ? value : "",
     };
     this._persistSingleItemizationBackup();
-    this._skipNextRender = true;
     this._validateAndEmit();
   }
 
@@ -556,23 +543,24 @@ export class FortumEnergySingleStrategyEditor extends HTMLElement {
     const target = event.currentTarget;
     const field = target?.dataset?.field;
 
+    if (field !== "override_temperature" && field !== "debug" && field !== "itemization_mode") {
+      this._skipNextRender = true;
+    }
+
     if (field === "metering_point_number") {
       this._state.meteringPointNumber = target.value;
-      this._skipNextRender = true;
       this._validateAndEmit();
       return;
     }
 
     if (field === "metering_point_name") {
       this._state.meteringPointName = target.value;
-      this._skipNextRender = true;
       this._validateAndEmit();
       return;
     }
 
     if (field === "metering_point_temperature") {
       this._state.meteringPointTemperature = target.value;
-      this._skipNextRender = true;
       this._validateAndEmit();
       return;
     }
@@ -616,7 +604,6 @@ export class FortumEnergySingleStrategyEditor extends HTMLElement {
         [field]: target.value,
       };
       this._persistSingleItemizationBackup();
-      this._skipNextRender = true;
       this._validateAndEmit();
     }
   }
