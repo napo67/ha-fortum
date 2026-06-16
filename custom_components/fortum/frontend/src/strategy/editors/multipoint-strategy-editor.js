@@ -63,20 +63,8 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
     if (!oldHass) {
       return true;
     }
-    const oldPoints = listDiscoverableMeteringPoints(oldHass);
-    const newPoints = listDiscoverableMeteringPoints(newHass);
-    if (oldPoints.length !== newPoints.length) {
-      return true;
-    }
-    for (let i = 0; i < oldPoints.length; i++) {
-      if (
-        oldPoints[i].number !== newPoints[i].number ||
-        oldPoints[i].address !== newPoints[i].address
-      ) {
-        return true;
-      }
-    }
-    return false;
+    return JSON.stringify(listDiscoverableMeteringPoints(oldHass)) !==
+      JSON.stringify(listDiscoverableMeteringPoints(newHass));
   }
 
   _render() {
@@ -420,10 +408,10 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
       return;
     }
     const value = typeof event?.detail?.value === "string" ? event.detail.value : "";
+    this._skipNextRender = true;
 
     if (field === "point_temperature_stat") {
       point.temperature = value;
-      this._skipNextRender = true;
       this._validateAndEmit();
       return;
     }
@@ -433,7 +421,6 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
       return;
     }
     point.itemizationRows[rowIndex].stat = value;
-    this._skipNextRender = true;
     this._validateAndEmit();
   }
 
@@ -443,6 +430,10 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
     }
     const target = event.currentTarget;
     const field = target?.dataset?.field;
+
+    if (field !== "debug" && field !== "point_override_temperature") {
+      this._skipNextRender = true;
+    }
 
     if (field === "debug") {
       this._state.debug = target.checked;
@@ -458,13 +449,11 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
 
     if (field === "point_number") {
       point.number = target.value;
-      this._skipNextRender = true;
       this._validateAndEmit();
       return;
     }
     if (field === "point_name") {
       point.name = target.value;
-      this._skipNextRender = true;
       this._validateAndEmit();
       return;
     }
@@ -478,7 +467,6 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
     }
     if (field === "point_temperature") {
       point.temperature = target.value;
-      this._skipNextRender = true;
       this._validateAndEmit();
       return;
     }
@@ -491,7 +479,6 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
         ...point.itemizationRows[rowIndex],
         [field === "row_stat" ? "stat" : "name"]: target.value,
       };
-      this._skipNextRender = true;
       this._validateAndEmit();
     }
   }
