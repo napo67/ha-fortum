@@ -106,12 +106,24 @@ else
     fi
 fi
 
+# Always ensure manifest.json is checked and synced
+MANIFEST_FILE="custom_components/fortum/manifest.json"
+if [ -f "$MANIFEST_FILE" ]; then
+    if ! echo "$PARSED_FILES" | grep -qx "$MANIFEST_FILE"; then
+        if [ -n "$PARSED_FILES" ]; then
+            PARSED_FILES=$(printf "%s\n%s" "$MANIFEST_FILE" "$PARSED_FILES")
+        else
+            PARSED_FILES="$MANIFEST_FILE"
+        fi
+    fi
+fi
+
 if [ -z "$PARSED_FILES" ]; then
     echo "No changed/matching files detected under custom_components/fortum/."
     exit 0
 fi
 
-echo "Found the following changed files to copy:"
+echo "Found the following files to check/copy:"
 echo "$PARSED_FILES"
 echo "----------------------------------------"
 
