@@ -160,6 +160,7 @@ class APIEndpoints:
         from_date: date,
         to_date: date,
         resolution: str = "PER_15_MIN",
+        use_cache: bool = True,
     ) -> str:
         """Get spot prices URL with tRPC format."""
         input_data = {
@@ -169,6 +170,7 @@ class APIEndpoints:
                     "fromDate": from_date.isoformat(),
                     "toDate": to_date.isoformat(),
                     "resolution": resolution,
+                    "useCache": use_cache,
                 }
             }
         }
