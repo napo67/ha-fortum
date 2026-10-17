@@ -1,0 +1,61 @@
+{
+  "name": "Home Assistant Custom Component / HACS Dev (Fortum)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
+  "containerUser": "vscode",
+  "runArgs": [
+    "--security-opt", "label=disable",
+    "--security-opt", "seccomp=unconfined"
+  ],
+  "appPort": [
+    "8123:8123"
+  ],
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin"
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.gemini,target=/home/vscode/.gemini,type=bind,consistency=cached",
+    "source=ha-fortum-cache,target=/home/vscode/.cache,type=volume"
+  ],
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "charliermarsh.ruff",
+        "ms-python.python",
+        "ms-python.pylint",
+        "redhat.vscode-yaml",
+        "esbenp.prettier-vscode",
+        "tamasfe.even-better-toml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+          }
+        },
+        "ruff.enable": true,
+        "ruff.organizeImports": true,
+        "files.exclude": {
+          "**/__pycache__": true,
+          "**/.pytest_cache": true,
+          "**/.ruff_cache": true,
+          "**/.mypy_cache": true,
+          "**/config/home-assistant_v2.db*": true,
+          "**/config/.storage": true
+        }
+      }
+    }
+  },
+  "postCreateCommand": "chmod +x .devcontainer/sandbox-bwrap.sh .devcontainer/bootstrap.sh 2>/dev/null || true; mkdir -p .claude .agents; cp -n .devcontainer/templates/antigravity-settings.json .agents/settings.json 2>/dev/null || true; cp -n .devcontainer/templates/antigravity-hooks.json .agents/hooks.json 2>/dev/null || true; cp -n .devcontainer/templates/antigravity-safety-gate.sh .agents/safety-gate.sh 2>/dev/null || true; cp -n .devcontainer/templates/claude-code-settings.json .claude/settings.json 2>/dev/null || true; chmod +x .agents/safety-gate.sh 2>/dev/null || true; .devcontainer/bootstrap.sh && uv sync --all-extras"
+}
