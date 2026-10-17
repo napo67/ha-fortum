@@ -283,6 +283,7 @@ class TestFortumAPIClient:
         called_url = mock_get.call_args.args[0]
         assert "shared.spotPrices.listPriceAreaSpotPrices" in called_url
         assert "PER_15_MIN" in called_url
+        assert "%22useCache%22%3Atrue" in called_url
         mock_add_stats.assert_called_once()
         assert (
             mock_add_stats.call_args.args[1]["statistic_id"]
@@ -294,6 +295,34 @@ class TestFortumAPIClient:
         assert mock_add_stats.call_args.args[2][0]["mean"] == pytest.approx(4.365)
         assert mock_add_stats.call_args.args[2][0]["min"] == 4.23
         assert mock_add_stats.call_args.args[2][0]["max"] == 4.50
+
+    def test_get_spot_prices_url_includes_use_cache(
+        self, mock_hass, mock_auth_client
+    ) -> None:
+        """Spot prices URL should include required useCache boolean parameter."""
+        import urllib.parse
+        from datetime import date
+
+        client = FortumAPIClient(mock_hass, mock_auth_client)
+        url = client._endpoints.get_spot_prices_url(
+            price_area="FI",
+            from_date=date(2026, 10, 15),
+            to_date=date(2026, 10, 18),
+            resolution="PER_15_MIN",
+            use_cache=True,
+        )
+        assert "shared.spotPrices.listPriceAreaSpotPrices" in url
+        assert "batch=1" in url
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        payload = json.loads(params["input"][0])
+        assert payload["0"]["json"] == {
+            "priceArea": "FI",
+            "fromDate": "2026-10-15",
+            "toDate": "2026-10-18",
+            "resolution": "PER_15_MIN",
+            "useCache": True,
+        }
 
     async def test_fetch_spot_prices_for_areas_without_price_area_returns_empty(
         self, mock_hass, mock_auth_client
