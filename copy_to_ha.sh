@@ -97,10 +97,11 @@ else
     # Filter only for files under custom_components/fortum/
     FILES=$(git status --porcelain | grep -v -E "^(\?\?|\!\!)" | grep "custom_components/fortum/" || true)
 
-    # Fallback: If no modifications in git status, check files in the last commit
+    # Fallback: If no modifications in git status, check files in the last commit modifying integration
     if [ -z "$FILES" ]; then
-        echo "No modifications found in git status. Checking files in the last commit..."
-        FILES=$(get_files_from_ref HEAD | grep "^custom_components/fortum/" || true)
+        LAST_COMMIT=$(git log -n 1 --format="%H" HEAD -- custom_components/fortum/ 2>/dev/null || echo "HEAD")
+        echo "No modifications found in git status. Checking files in the last integration commit ($(git rev-parse --short "$LAST_COMMIT"))..."
+        FILES=$(get_files_from_ref "$LAST_COMMIT" | grep "^custom_components/fortum/" || true)
 
         # In this fallback case, the output from git show/diff is already a list of raw filenames
         PARSED_FILES="$FILES"
