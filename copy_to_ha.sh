@@ -22,6 +22,17 @@ show_help() {
     echo "falling back to the last commit if git status is clean."
 }
 
+# Get files changed in a git ref, supporting both single commits and merge commits
+get_files_from_ref() {
+    local ref="$1"
+    if git rev-parse -q --verify "${ref}^2" >/dev/null 2>&1; then
+        # Merge commit: diff against first parent to capture files brought in by the merge
+        git diff --name-only "${ref}^1" "${ref}"
+    else
+        git show --name-only --pretty="" "${ref}"
+    fi
+}
+
 MODE="default"
 GIT_REF=""
 TEST_MODE=false
@@ -79,7 +90,7 @@ if [ "$MODE" = "all" ]; then
     PARSED_FILES=$(find custom_components/fortum -type f | grep -v -E "(__pycache__|/\.|\.pyc|frontend/node_modules|frontend/src)" || true)
 elif [ "$MODE" = "git-ref" ]; then
     echo "Checking files changed in git reference '$GIT_REF'..."
-    PARSED_FILES=$(git show --name-only --pretty="" "$GIT_REF" | grep "^custom_components/fortum/" || true)
+    PARSED_FILES=$(get_files_from_ref "$GIT_REF" | grep "^custom_components/fortum/" || true)
 else
     echo "Detecting modified files using git status..."
     # Retrieve all modified/added/renamed files, excluding untracked (??) or ignored (!!) files
@@ -89,9 +100,9 @@ else
     # Fallback: If no modifications in git status, check files in the last commit
     if [ -z "$FILES" ]; then
         echo "No modifications found in git status. Checking files in the last commit..."
-        FILES=$(git show --name-only --pretty="" HEAD | grep "^custom_components/fortum/" || true)
-        
-        # In this fallback case, the output from git show is already a list of raw filenames
+        FILES=$(get_files_from_ref HEAD | grep "^custom_components/fortum/" || true)
+
+        # In this fallback case, the output from git show/diff is already a list of raw filenames
         PARSED_FILES="$FILES"
     else
         # Parse git status --porcelain output to get clean filenames (handling renames '->' if any)
