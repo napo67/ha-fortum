@@ -1,0 +1,26 @@
+{
+  "name": "antigravity-enterprise-security-policy",
+  "description": "Antigravity IDE and CLI enterprise security policies, terminal bridge permissions, and safety gates.",
+  "permissions": {
+    "default_policy": "prompt",
+    "allow": [
+      "command(agy*)",
+      "command(dispatch-subagent*)",
+      "command(*dispatch-subagent*)",
+      "command(./scripts/dispatch-subagent.sh*)",
+      "command(scripts/dispatch-subagent.sh*)",
+      "command(git:--no-pager:*)",
+      "command(make:*)",
+      "command(pytest:*)",
+      "command(cargo:*)",
+      "command(npm:*)",
+      "command(pnpm:*)",
+      "command(uv:*)"
+    ],
+    "deny": [
+      "command(sudo:*)",
+      "command(su:*)",
+      "command(curl:*://169.254.169.254/*)"
+    ]
+  }
+}

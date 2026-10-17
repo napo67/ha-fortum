@@ -154,6 +154,18 @@ cython_debug/
 .devcontainer/config/custom_components/
 !.devcontainer/config/custom_components/.gitkeep
 
+# Home Assistant local development config runtime files
+config/secrets.yaml
+config/home-assistant_v2.db*
+config/.storage/
+config/logs/
+config/deps/
+config/tts/
+config/www/
+config/.cloud/
+config/blueprints/
+config/custom_components/
+
 # Local Home Assistant frontend compatibility cache
 ha-frontend/
 
