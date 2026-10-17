@@ -103,7 +103,8 @@ GET `https://www.fortum.com/fi/sahkoa/api/trpc/shared.spotPrices.listPriceAreaSp
       "priceArea": "FI",
       "fromDate": "2026-03-25",
       "toDate": "2026-03-28",
-      "resolution": "PER_15_MIN"
+      "resolution": "PER_15_MIN",
+      "useCache": true
     }
   }
 }
