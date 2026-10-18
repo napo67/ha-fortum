@@ -19,12 +19,14 @@ from .const import (
     CONF_DEBUG_LOGGING,
     CONF_FORCE_SHORT_TOKEN_LIFETIME,
     CONF_REGION,
+    CONF_SPLIT_AVERAGE_PRICE,
     DEFAULT_CREATE_CURRENT_MONTH_SENSORS,
     DEFAULT_CREATE_DASHBOARD,
     DEFAULT_DEBUG_ENTITIES,
     DEFAULT_DEBUG_LOGGING,
     DEFAULT_FORCE_SHORT_TOKEN_LIFETIME,
     DEFAULT_REGION,
+    DEFAULT_SPLIT_AVERAGE_PRICE,
     DOMAIN,
     SUPPORTED_REGIONS,
 )
@@ -50,6 +52,10 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(
             CONF_FORCE_SHORT_TOKEN_LIFETIME,
             default=DEFAULT_FORCE_SHORT_TOKEN_LIFETIME,
+        ): bool,
+        vol.Optional(
+            CONF_SPLIT_AVERAGE_PRICE,
+            default=DEFAULT_SPLIT_AVERAGE_PRICE,
         ): bool,
     }
 )
@@ -131,6 +137,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_CREATE_CURRENT_MONTH_SENSORS,
                         DEFAULT_CREATE_CURRENT_MONTH_SENSORS,
                     ),
+                    CONF_SPLIT_AVERAGE_PRICE: user_input.get(
+                        CONF_SPLIT_AVERAGE_PRICE,
+                        DEFAULT_SPLIT_AVERAGE_PRICE,
+                    ),
                 }
 
                 return self.async_create_entry(
@@ -180,15 +190,44 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             }
             new_options = {
                 **self._config_entry.options,
-                CONF_DEBUG_ENTITIES: user_input[CONF_DEBUG_ENTITIES],
-                CONF_DEBUG_LOGGING: user_input[CONF_DEBUG_LOGGING],
-                CONF_FORCE_SHORT_TOKEN_LIFETIME: user_input[
-                    CONF_FORCE_SHORT_TOKEN_LIFETIME
-                ],
-                CONF_CREATE_DASHBOARD: user_input[CONF_CREATE_DASHBOARD],
-                CONF_CREATE_CURRENT_MONTH_SENSORS: user_input[
-                    CONF_CREATE_CURRENT_MONTH_SENSORS
-                ],
+                CONF_DEBUG_ENTITIES: user_input.get(
+                    CONF_DEBUG_ENTITIES,
+                    self._config_entry.options.get(
+                        CONF_DEBUG_ENTITIES, DEFAULT_DEBUG_ENTITIES
+                    ),
+                ),
+                CONF_DEBUG_LOGGING: user_input.get(
+                    CONF_DEBUG_LOGGING,
+                    self._config_entry.options.get(
+                        CONF_DEBUG_LOGGING, DEFAULT_DEBUG_LOGGING
+                    ),
+                ),
+                CONF_FORCE_SHORT_TOKEN_LIFETIME: user_input.get(
+                    CONF_FORCE_SHORT_TOKEN_LIFETIME,
+                    self._config_entry.options.get(
+                        CONF_FORCE_SHORT_TOKEN_LIFETIME,
+                        DEFAULT_FORCE_SHORT_TOKEN_LIFETIME,
+                    ),
+                ),
+                CONF_CREATE_DASHBOARD: user_input.get(
+                    CONF_CREATE_DASHBOARD,
+                    self._config_entry.options.get(
+                        CONF_CREATE_DASHBOARD, DEFAULT_CREATE_DASHBOARD
+                    ),
+                ),
+                CONF_CREATE_CURRENT_MONTH_SENSORS: user_input.get(
+                    CONF_CREATE_CURRENT_MONTH_SENSORS,
+                    self._config_entry.options.get(
+                        CONF_CREATE_CURRENT_MONTH_SENSORS,
+                        DEFAULT_CREATE_CURRENT_MONTH_SENSORS,
+                    ),
+                ),
+                CONF_SPLIT_AVERAGE_PRICE: user_input.get(
+                    CONF_SPLIT_AVERAGE_PRICE,
+                    self._config_entry.options.get(
+                        CONF_SPLIT_AVERAGE_PRICE, DEFAULT_SPLIT_AVERAGE_PRICE
+                    ),
+                ),
             }
 
             self.hass.config_entries.async_update_entry(
@@ -250,6 +289,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         default=self._config_entry.options.get(
                             CONF_FORCE_SHORT_TOKEN_LIFETIME,
                             DEFAULT_FORCE_SHORT_TOKEN_LIFETIME,
+                        ),
+                    ): bool,
+                    vol.Required(
+                        CONF_SPLIT_AVERAGE_PRICE,
+                        default=self._config_entry.options.get(
+                            CONF_SPLIT_AVERAGE_PRICE,
+                            DEFAULT_SPLIT_AVERAGE_PRICE,
                         ),
                     ): bool,
                 }

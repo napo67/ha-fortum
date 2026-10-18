@@ -402,8 +402,8 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
     const amount = typeof value === "number" ? value : Number(value || 0);
     const lang = this._hass?.locale?.language || "en";
     const formatted = new Intl.NumberFormat(lang, {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     }).format(amount);
     return this._priceUnit ? `${formatted} ${this._priceUnit}` : formatted;
   }
@@ -447,33 +447,69 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
   _renderLegendTable(rows, hiddenIds) {
     const container = this.shadowRoot?.querySelector("#stats");
     if (!container) {
+      console.log("[Fortum FuturePriceCard] Render stats container missing");
       return;
     }
+    const isSplit = this._splitAveragePrice === true;
+    console.log("[Fortum FuturePriceCard] Rendering table:", {
+      isSplit,
+      splitAveragePrice: this._splitAveragePrice,
+      rowsCount: rows?.length,
+      rows: rows
+    });
+    const headers = isSplit
+      ? `
+          <th>Series</th>
+          <th class="num">Min</th>
+          <th class="num">Max</th>
+          <th class="num">Avg (Tod)</th>
+          <th class="num">Avg (Tom)</th>
+          <th class="num">Now</th>
+        `
+      : `
+          <th>Series</th>
+          <th class="num">Min</th>
+          <th class="num">Max</th>
+          <th class="num">Avg</th>
+          <th class="num">Now</th>
+        `;
+
+    const body = (rows || [])
+      .map(
+        (row) => {
+          const cells = isSplit
+            ? `
+                <td class="num">${this._formatPriceValue(row.min)}</td>
+                <td class="num">${this._formatPriceValue(row.max)}</td>
+                <td class="num">${this._formatPriceValue(row.avgToday)}</td>
+                <td class="num">${row.avgTomorrow !== null ? this._formatPriceValue(row.avgTomorrow) : "-"}</td>
+                <td class="num">${this._formatPriceValue(row.now ?? row.last)}</td>
+              `
+            : `
+                <td class="num">${this._formatPriceValue(row.min)}</td>
+                <td class="num">${this._formatPriceValue(row.max)}</td>
+                <td class="num">${this._formatPriceValue(row.avg)}</td>
+                <td class="num">${this._formatPriceValue(row.now ?? row.last)}</td>
+              `;
+          return `
+            <tr class="${row.id && hiddenIds?.has(row.id) ? "hidden" : ""}">
+              <td><span class="series"><span class="dot" style="color: ${row.color}; background-color: ${row.color};"></span><span class="label">${row.name}</span></span></td>
+              ${cells}
+            </tr>
+          `;
+        }
+      )
+      .join("");
+
     container.innerHTML = `
       <table>
         <thead>
           <tr>
-            <th>Series</th>
-            <th class="num">Min</th>
-            <th class="num">Max</th>
-            <th class="num">Avg</th>
-            <th class="num">Now</th>
+            ${headers}
           </tr>
         </thead>
         <tbody>
-          ${(rows || [])
-            .map(
-              (row) => `
-            <tr class="${row.id && hiddenIds?.has(row.id) ? "hidden" : ""}">
-              <td><span class="series"><span class="dot" style="color: ${row.color}; background-color: ${row.color};"></span><span class="label">${row.name}</span></span></td>
-              <td class="num">${this._formatPriceValue(row.min)}</td>
-              <td class="num">${this._formatPriceValue(row.max)}</td>
-              <td class="num">${this._formatPriceValue(row.avg)}</td>
-              <td class="num">${this._formatPriceValue(row.now ?? row.last)}</td>
-            </tr>
-          `
-            )
-            .join("")}
+          ${body}
         </tbody>
       </table>
     `;
@@ -784,6 +820,9 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
       const { start, end } = this._getFixedRange();
       this._rangeStartMs = start.getTime();
       this._rangeEndMs = end.getTime();
+      const tomorrowStart = new Date(start);
+      tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+      this._tomorrowStartMs = tomorrowStart.getTime();
       const token = (this._token || 0) + 1;
       this._token = token;
 
@@ -793,32 +832,91 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
       };
       debugPayload.fetch.requestedIds = forecastIds;
 
-      const raw = await this._fetchStats(forecastIds, start, end, "hour", ["max"]);
-      if (this._token !== token) {
-        return;
+      const firstEntityId = forecastIds[0];
+      let splitAveragePrice = this._config?.split_average_price === true;
+      let lookupMethod = "config_only";
+      let stateObj = null;
+      if (firstEntityId) {
+        stateObj = this._hass?.states[firstEntityId];
+        if (!stateObj) {
+          const match = firstEntityId.match(/^fortum:price_forecast_([a-z0-9_]+)$/i);
+          if (match) {
+            const areaCode = match[1].toUpperCase();
+            stateObj = Object.values(this._hass?.states || {}).find(
+              (state) =>
+                state.entity_id.startsWith("sensor.") &&
+                state.entity_id.includes("price") &&
+                state.attributes?.price_area?.toUpperCase() === areaCode
+            );
+            lookupMethod = "price_area_match";
+          }
+        } else {
+          lookupMethod = "direct_entity_id";
+        }
+        if (stateObj?.attributes?.split_average_price === true) {
+          splitAveragePrice = true;
+        }
       }
-      const pointsByStatId = {};
-      forecastIds.forEach((statId) => {
-        pointsByStatId[statId] = this._normalizeMaxSeries(raw?.[statId]);
-        debugPayload.fetch.pointCounts[statId] = pointsByStatId[statId].length;
-      });
+      this._splitAveragePrice = splitAveragePrice;
 
+      const pointsByStatId = {};
       this._priceUnit = "";
-      let meta = {};
-      try {
-        meta = await this._fetchStatsMetadata(forecastIds);
+      let usedForecastFromAttributes = false;
+
+      if (stateObj && Array.isArray(stateObj.attributes.forecast) && stateObj.attributes.forecast.length > 0) {
+        const rangeStartMs = start.getTime();
+        const rangeEndMs = end.getTime();
+        const points = stateObj.attributes.forecast
+          .map((p) => {
+            const ts = Date.parse(p.date_time);
+            const val = Number(p.price);
+            if (Number.isFinite(ts) && Number.isFinite(val)) {
+              return [ts, val];
+            }
+            return null;
+          })
+          .filter(Boolean)
+          .filter(([ts]) => ts >= rangeStartMs && ts <= rangeEndMs)
+          .sort((a, b) => a[0] - b[0]);
+
+
+        if (points.length > 0) {
+          forecastIds.forEach((statId) => {
+            pointsByStatId[statId] = points;
+            debugPayload.fetch.pointCounts[statId] = points.length;
+          });
+          const unit = stateObj.attributes.unit_of_measurement;
+          this._priceUnit = typeof unit === "string" ? unit : "";
+          usedForecastFromAttributes = true;
+        }
+      }
+
+      if (!usedForecastFromAttributes) {
+        const raw = await this._fetchStats(forecastIds, start, end, "hour", ["max"]);
         if (this._token !== token) {
           return;
         }
-        const unit = forecastIds
-          .map((statId) => meta?.[statId]?.statistics_unit_of_measurement)
-          .find((value) => typeof value === "string");
-        this._priceUnit = typeof unit === "string" ? unit : "";
-        debugPayload.fetch.metadataUnit = this._priceUnit;
-      } catch (_err) {
-        this._priceUnit = "";
-        meta = {};
-        debugPayload.fetch.metadataError = true;
+        forecastIds.forEach((statId) => {
+          pointsByStatId[statId] = this._normalizeMaxSeries(raw?.[statId]);
+          debugPayload.fetch.pointCounts[statId] = pointsByStatId[statId].length;
+        });
+
+        let meta = {};
+        try {
+          meta = await this._fetchStatsMetadata(forecastIds);
+          if (this._token !== token) {
+            return;
+          }
+          const unit = forecastIds
+            .map((statId) => meta?.[statId]?.statistics_unit_of_measurement)
+            .find((value) => typeof value === "string");
+          this._priceUnit = typeof unit === "string" ? unit : "";
+          debugPayload.fetch.metadataUnit = this._priceUnit;
+        } catch (_err) {
+          this._priceUnit = "";
+          meta = {};
+          debugPayload.fetch.metadataError = true;
+        }
       }
 
       const series = [];
@@ -833,6 +931,28 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
           .map((item) => Number(item[1]))
           .filter((v) => Number.isFinite(v));
         values.push(...pointValues);
+
+        const todayValues = [];
+        const tomorrowValues = [];
+        points.forEach((item) => {
+          const ts = Number(item[0]);
+          const val = Number(item[1]);
+          if (Number.isFinite(val)) {
+            if (Number.isFinite(this._tomorrowStartMs) && ts >= this._tomorrowStartMs) {
+              tomorrowValues.push(val);
+            } else {
+              todayValues.push(val);
+            }
+          }
+        });
+
+        const avgToday = todayValues.length
+          ? todayValues.reduce((acc, v) => acc + v, 0) / todayValues.length
+          : 0;
+        const avgTomorrow = tomorrowValues.length
+          ? tomorrowValues.reduce((acc, v) => acc + v, 0) / tomorrowValues.length
+          : null;
+
         series.push({
           id: seriesId,
           name: seriesName,
@@ -861,6 +981,8 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
           avg: pointValues.length
             ? pointValues.reduce((acc, v) => acc + v, 0) / pointValues.length
             : 0,
+          avgToday,
+          avgTomorrow,
           now: this._getNowForecastValue(points),
         });
       });
@@ -880,8 +1002,6 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
       }
 
       this._priceAxisDigits = computeAxisFractionDigits(values);
-      const tomorrowStart = new Date(start);
-      tomorrowStart.setDate(tomorrowStart.getDate() + 1);
 
       const options = {
       grid: { top: 20, bottom: 0, left: 1, right: 1, containLabel: true },
@@ -953,7 +1073,6 @@ export class FortumEnergyFuturePriceCard extends HTMLElement {
       this._allSeries = series;
       this._chartOptions = options;
       this._legendRows = legendRows;
-      this._tomorrowStartMs = tomorrowStart.getTime();
       debugPayload.result = {
         status: "ok",
         seriesCount: series.length,
