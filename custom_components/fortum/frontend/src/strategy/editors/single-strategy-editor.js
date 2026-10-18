@@ -40,6 +40,11 @@ export class FortumEnergySingleStrategyEditor extends HTMLElement {
     this._error = "";
     this._statisticPickerAvailable = Boolean(customElements.get("ha-statistic-picker"));
 
+    if (this._skipNextRender) {
+      this._skipNextRender = false;
+      return;
+    }
+
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" });
     }
@@ -48,10 +53,21 @@ export class FortumEnergySingleStrategyEditor extends HTMLElement {
   }
 
   set hass(value) {
+    const oldHass = this._hass;
     this._hass = value;
-    this._applyStatisticPickerProps();
-    this._render();
+    const changed = this._meteringPointsChanged(oldHass, value);
+    if (changed) {
+      this._render();
+    }
     this._maybeEnsureStatisticPickerLoaded();
+  }
+
+  _meteringPointsChanged(oldHass, newHass) {
+    if (!oldHass) {
+      return true;
+    }
+    return JSON.stringify(listDiscoverableMeteringPoints(oldHass)) !==
+      JSON.stringify(listDiscoverableMeteringPoints(newHass));
   }
 
   get hass() {
@@ -497,6 +513,7 @@ export class FortumEnergySingleStrategyEditor extends HTMLElement {
     if (!this._state) {
       return;
     }
+    this._skipNextRender = true;
     const target = event.currentTarget;
     const field = target?.dataset?.field;
     const value = event?.detail?.value;
@@ -525,6 +542,10 @@ export class FortumEnergySingleStrategyEditor extends HTMLElement {
     }
     const target = event.currentTarget;
     const field = target?.dataset?.field;
+
+    if (field !== "override_temperature" && field !== "debug" && field !== "itemization_mode") {
+      this._skipNextRender = true;
+    }
 
     if (field === "metering_point_number") {
       this._state.meteringPointNumber = target.value;
@@ -661,9 +682,14 @@ export class FortumEnergySingleStrategyEditor extends HTMLElement {
       emitConfigChanged(this, validated);
     } catch (err) {
       this._error = err && err.message ? err.message : String(err);
+      this._skipNextRender = false;
+      this._render();
+      return;
     }
 
-    this._render();
+    if (!this._skipNextRender) {
+      this._render();
+    }
   }
 }
 

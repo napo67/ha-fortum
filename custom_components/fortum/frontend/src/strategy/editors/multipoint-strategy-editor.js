@@ -37,6 +37,11 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
     this._draftErrors = {};
     this._statisticPickerAvailable = Boolean(customElements.get("ha-statistic-picker"));
 
+    if (this._skipNextRender) {
+      this._skipNextRender = false;
+      return;
+    }
+
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" });
     }
@@ -45,10 +50,21 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
   }
 
   set hass(value) {
+    const oldHass = this._hass;
     this._hass = value;
-    this._applyStatisticPickerProps();
-    this._render();
+    const changed = this._meteringPointsChanged(oldHass, value);
+    if (changed) {
+      this._render();
+    }
     this._maybeEnsureStatisticPickerLoaded();
+  }
+
+  _meteringPointsChanged(oldHass, newHass) {
+    if (!oldHass) {
+      return true;
+    }
+    return JSON.stringify(listDiscoverableMeteringPoints(oldHass)) !==
+      JSON.stringify(listDiscoverableMeteringPoints(newHass));
   }
 
   _render() {
@@ -392,6 +408,7 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
       return;
     }
     const value = typeof event?.detail?.value === "string" ? event.detail.value : "";
+    this._skipNextRender = true;
 
     if (field === "point_temperature_stat") {
       point.temperature = value;
@@ -413,6 +430,10 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
     }
     const target = event.currentTarget;
     const field = target?.dataset?.field;
+
+    if (field !== "debug" && field !== "point_override_temperature") {
+      this._skipNextRender = true;
+    }
 
     if (field === "debug") {
       this._state.debug = target.checked;
@@ -502,7 +523,7 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
 
     if (action === "add-row") {
       this._state.points[pointIndex].itemizationRows = this._state.points[pointIndex].itemizationRows
-        .concat({ stat: "", name: "" });
+          .concat({ stat: "", name: "" });
       this._validateAndEmit();
       return;
     }
@@ -513,7 +534,7 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
         return;
       }
       this._state.points[pointIndex].itemizationRows = this._state.points[pointIndex].itemizationRows
-        .filter((_, index) => index !== rowIndex);
+          .filter((_, index) => index !== rowIndex);
       this._validateAndEmit();
     }
   }
@@ -522,6 +543,7 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
     this._draftErrors = this._collectDraftErrors();
     if (Object.keys(this._draftErrors).length) {
       this._error = "";
+      this._skipNextRender = false;
       this._render();
       return;
     }
@@ -533,8 +555,13 @@ export class FortumEnergyMultipointStrategyEditor extends HTMLElement {
       emitConfigChanged(this, validated);
     } catch (err) {
       this._error = err && err.message ? err.message : String(err);
+      this._skipNextRender = false;
+      this._render();
+      return;
     }
-    this._render();
+    if (!this._skipNextRender) {
+      this._render();
+    }
   }
 
   _collectDraftErrors() {
