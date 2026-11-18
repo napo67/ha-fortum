@@ -37,6 +37,7 @@ from ..exceptions import (
     UnexpectedStatusCodeError,
 )
 from ..models import (
+    CoreMetricsState,
     CustomerDetails,
     MeteringPoint,
     SpotPricePoint,
@@ -1088,8 +1089,7 @@ class FortumAPIClient:
             if point_time < sync_start or point_time >= sync_end:
                 continue
 
-            # Fortum signals core hourly availability via price presence.
-            if point.price is None:
+            if point.core_metrics_state is not CoreMetricsState.PRESENT:
                 continue
 
             consumption_value = float(point.total_energy)
@@ -1103,18 +1103,19 @@ class FortumAPIClient:
                 }
             )
 
-            if point.cost:
-                cost_value = float(point.total_cost)
-                rows.cost.append(
-                    {
-                        "start": point_time,
-                        "state": cost_value,
-                        "mean": cost_value,
-                        "min": cost_value,
-                        "max": cost_value,
-                    }
-                )
+            cost_value = float(point.total_cost)
+            rows.cost.append(
+                {
+                    "start": point_time,
+                    "state": cost_value,
+                    "mean": cost_value,
+                    "min": cost_value,
+                    "max": cost_value,
+                }
+            )
 
+            # Guaranteed by CoreMetricsState.PRESENT; narrows the type.
+            assert point.price is not None
             price_value = float(point.price.total)
             rows.price.append(
                 {
@@ -1393,7 +1394,7 @@ class FortumAPIClient:
                 time_series.metering_point_no
             )
             ordered_points = sorted(time_series.series, key=lambda item: item.at_utc)
-            gap_summary = self._summarize_price_gaps(ordered_points)
+            gap_summary = self._summarize_core_metric_gaps(ordered_points)
             if gap_summary is not None:
                 _LOGGER.warning(
                     "gap in stats for %s: %s",
@@ -1528,59 +1529,73 @@ class FortumAPIClient:
         return result.changed_or_added_hours
 
     @staticmethod
-    def _summarize_price_gaps(
+    def _summarize_core_metric_gaps(
         ordered_points: list[TimeSeriesDataPoint],
     ) -> str | None:
         """Return one-line summary of hourly core-metric gaps.
 
-        Price presence is used as the existence marker for the core hourly
-        bundle (energy/cost/price).
+        A trailing missing-only run is expected Fortum delay and not reported.
+        Inconsistent runs (some core metrics present, others missing) are
+        always reported.
         """
         if not ordered_points:
             return None
 
-        intervals: list[tuple[datetime, int, bool]] = []
-        run_start = dt_util.as_utc(ordered_points[0].at_utc).replace(
-            minute=0,
-            second=0,
-            microsecond=0,
-        )
-        run_missing = ordered_points[0].price is None
-        run_hours = 1
-        previous_time = run_start
+        def _run_label(point: TimeSeriesDataPoint) -> str:
+            state = point.core_metrics_state
+            if state is not CoreMetricsState.INCONSISTENT:
+                return state.value
+            present = ", ".join(point.present_core_metrics)
+            return f"{state.value} (only {present})"
 
-        for point in ordered_points[1:]:
-            point_time = dt_util.as_utc(point.at_utc).replace(
+        def _point_hour(point: TimeSeriesDataPoint) -> datetime:
+            return dt_util.as_utc(point.at_utc).replace(
                 minute=0,
                 second=0,
                 microsecond=0,
             )
-            point_missing = point.price is None
+
+        intervals: list[tuple[datetime, int, str]] = []
+        run_start = _point_hour(ordered_points[0])
+        run_label = _run_label(ordered_points[0])
+        run_hours = 1
+        previous_time = run_start
+
+        for point in ordered_points[1:]:
+            point_time = _point_hour(point)
+            point_label = _run_label(point)
             contiguous = point_time == previous_time + timedelta(hours=1)
-            if contiguous and point_missing == run_missing:
+            if contiguous and point_label == run_label:
                 run_hours += 1
             else:
-                intervals.append((run_start, run_hours, run_missing))
+                intervals.append((run_start, run_hours, run_label))
                 run_start = point_time
-                run_missing = point_missing
+                run_label = point_label
                 run_hours = 1
             previous_time = point_time
 
-        intervals.append((run_start, run_hours, run_missing))
+        intervals.append((run_start, run_hours, run_label))
 
-        first_missing_index = next(
-            (idx for idx, (_, _, is_missing) in enumerate(intervals) if is_missing),
+        first_gap_index = next(
+            (
+                idx
+                for idx, (_, _, label) in enumerate(intervals)
+                if label != CoreMetricsState.PRESENT
+            ),
             None,
         )
-        if first_missing_index is None or first_missing_index == len(intervals) - 1:
+        if first_gap_index is None:
+            return None
+        if (
+            first_gap_index == len(intervals) - 1
+            and intervals[-1][2] == CoreMetricsState.MISSING
+        ):
             return None
 
-        summary_parts = []
-        for start, hours, is_missing in intervals[first_missing_index:]:
-            state = "missing" if is_missing else "present"
-            summary_parts.append(f"{_fmt_utc_minute(start)} {hours}h {state}")
-
-        return ", ".join(summary_parts)
+        return ", ".join(
+            f"{_fmt_utc_minute(start)} {hours}h {label}"
+            for start, hours, label in intervals[first_gap_index:]
+        )
 
     def _record_earliest_available_marker(
         self,
@@ -1713,15 +1728,16 @@ class FortumAPIClient:
             return []
 
         all_price_data: list[SpotPricePoint] = []
-        errors: list[str] = []
+        errors: dict[str, APIError] = {}
         for area_code in price_areas:
-            area_price_data = await self._fetch_price_data_for_area(
-                area_code,
-                from_date,
-                to_date,
-            )
-            if area_price_data is None:
-                errors.append(area_code)
+            try:
+                area_price_data = await self._fetch_price_data_for_area(
+                    area_code,
+                    from_date,
+                    to_date,
+                )
+            except APIError as exc:
+                errors[area_code] = exc
                 continue
             if not area_price_data:
                 continue
@@ -1729,11 +1745,14 @@ class FortumAPIClient:
             self._record_price_forecast_statistics(area_code, area_price_data)
             all_price_data.extend(area_price_data)
 
-        if errors and not all_price_data:
-            raise APIError(
-                "Failed to fetch spot price data for configured price areas: "
-                + ", ".join(errors)
-            )
+        if errors:
+            details = "; ".join(f"{area}: {exc}" for area, exc in errors.items())
+            if not all_price_data:
+                first_error = next(iter(errors.values()))
+                raise APIError(
+                    f"Failed to fetch spot prices: {details}"
+                ) from first_error
+            _LOGGER.info("spot price fetch failed for some areas: %s", details)
 
         all_price_data.sort(key=lambda point: (point.date_time, point.area_code))
         return all_price_data
@@ -1743,7 +1762,7 @@ class FortumAPIClient:
         area_code: str,
         from_date: date_cls,
         to_date: date_cls,
-    ) -> list[SpotPricePoint] | None:
+    ) -> list[SpotPricePoint]:
         """Fetch spot prices for one explicit area code."""
         last_error: APIError | None = None
         for resolution in PRICE_RESOLUTIONS:
@@ -1811,8 +1830,7 @@ class FortumAPIClient:
                 last_error = exc
 
         if last_error is not None:
-            _LOGGER.info("price fetch failed area=%s error=%s", area_code, last_error)
-            return None
+            raise last_error
 
         _LOGGER.debug(
             "no price data records area=%s from_date=%s to_date=%s",

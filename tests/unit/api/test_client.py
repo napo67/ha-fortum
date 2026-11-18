@@ -324,6 +324,68 @@ class TestFortumAPIClient:
             "useCache": True,
         }
 
+    async def test_fetch_spot_prices_for_areas_all_failed_keeps_error_details(
+        self, mock_hass, mock_auth_client
+    ):
+        """All-area failure should surface each area's underlying error."""
+        client = FortumAPIClient(mock_hass, mock_auth_client)
+        area_error = APIError("Server error (BAD_REQUEST): useCache required")
+
+        with (
+            patch.object(client, "_get", side_effect=area_error),
+            patch(
+                "custom_components.fortum.api.client.async_add_external_statistics"
+            ) as mock_add_stats,
+            pytest.raises(APIError) as exc_info,
+        ):
+            await client.fetch_spot_prices_for_areas(("FI",))
+
+        assert str(exc_info.value) == (
+            "Failed to fetch spot prices: "
+            "FI: Server error (BAD_REQUEST): useCache required"
+        )
+        assert exc_info.value.__cause__ is area_error
+        mock_add_stats.assert_not_called()
+
+    async def test_fetch_spot_prices_for_areas_partial_failure_returns_rest(
+        self, mock_hass, mock_auth_client
+    ):
+        """One failing area should not drop prices fetched for other areas."""
+        client = FortumAPIClient(mock_hass, mock_auth_client)
+        parsed_payload = [
+            {
+                "priceArea": "SE3",
+                "priceUnit": "SEK/kWh",
+                "spotPriceSeries": [
+                    {
+                        "atUTC": "2026-03-17T22:00:00.000Z",
+                        "spotPrice": {"total": 0.5},
+                    },
+                ],
+            }
+        ]
+
+        async def _get(url: str) -> Mock:
+            if "SE4" in url:
+                raise APIError("Server error (INTERNAL): boom")
+            return Mock()
+
+        with (
+            patch.object(client, "_get", side_effect=_get),
+            patch.object(
+                client,
+                "_parse_trpc_response",
+                return_value=parsed_payload,
+            ),
+            patch(
+                "custom_components.fortum.api.client.async_add_external_statistics"
+            ) as mock_add_stats,
+        ):
+            result = await client.fetch_spot_prices_for_areas(("SE3", "SE4"))
+
+        assert [point.area_code for point in result] == ["SE3"]
+        mock_add_stats.assert_called_once()
+
     async def test_fetch_spot_prices_for_areas_without_price_area_returns_empty(
         self, mock_hass, mock_auth_client
     ):
@@ -2523,7 +2585,7 @@ class TestFortumAPIClient:
         for call in mock_add_stats.call_args_list:
             assert len(call.args[2]) == 2
 
-    def test_summarize_price_gaps_formats_one_line_runs(
+    def test_summarize_core_metric_gaps_formats_one_line_runs(
         self, mock_hass, mock_auth_client
     ):
         """Gap summary should use UTC start hour and run-length format."""
@@ -2607,13 +2669,13 @@ class TestFortumAPIClient:
             ],
         )
 
-        summary = client._summarize_price_gaps(
+        summary = client._summarize_core_metric_gaps(
             sorted(time_series.series, key=lambda point: point.at_utc)
         )
 
         assert summary == "2026-03-30 21:00 2h missing, 2026-03-30 23:00 2h present"
 
-    def test_summarize_price_gaps_includes_trailing_missing_run(
+    def test_summarize_core_metric_gaps_includes_trailing_missing_run(
         self, mock_hass, mock_auth_client
     ):
         """Gap summary should include trailing missing interval at end."""
@@ -2675,14 +2737,14 @@ class TestFortumAPIClient:
             ),
         ]
 
-        summary = client._summarize_price_gaps(points)
+        summary = client._summarize_core_metric_gaps(points)
 
         assert summary == (
             "2026-03-30 21:00 2h missing, 2026-03-30 23:00 1h present, "
             "2026-03-31 00:00 2h missing"
         )
 
-    def test_summarize_price_gaps_ignores_trailing_missing_only(
+    def test_summarize_core_metric_gaps_ignores_trailing_missing_only(
         self, mock_hass, mock_auth_client
     ):
         """Trailing missing-only run should not be considered actionable gap."""
@@ -2730,9 +2792,96 @@ class TestFortumAPIClient:
             ),
         ]
 
-        summary = client._summarize_price_gaps(points)
+        summary = client._summarize_core_metric_gaps(points)
 
         assert summary is None
+
+    @staticmethod
+    def _core_point(
+        at_utc: str,
+        *,
+        energy: bool = True,
+        cost: bool = True,
+        price: bool = True,
+    ) -> TimeSeriesDataPoint:
+        """Build hourly point with selected core metrics present."""
+        return TimeSeriesDataPoint(
+            at_utc=datetime.fromisoformat(at_utc),
+            energy=[EnergyDataPoint(value=1.0, type="ENERGY")] if energy else [],
+            cost=[
+                CostDataPoint(
+                    total=0.50,
+                    value=0.50,
+                    type="COST_SALES_ELECTRICITY",
+                )
+            ]
+            if cost
+            else None,
+            price=Price(total=1.2, value=1.0, vat_amount=0.2, vat_percentage=25.0)
+            if price
+            else None,
+            temperature_reading=None,
+        )
+
+    def test_summarize_core_metric_gaps_reports_trailing_inconsistent_run(
+        self, mock_hass, mock_auth_client
+    ):
+        """Trailing inconsistent run should be reported with present metrics."""
+        client = FortumAPIClient(mock_hass, mock_auth_client)
+        points = [
+            self._core_point("2026-03-30T20:00:00+00:00"),
+            self._core_point("2026-03-30T21:00:00+00:00", cost=False, price=False),
+            self._core_point("2026-03-30T22:00:00+00:00", cost=False, price=False),
+        ]
+
+        summary = client._summarize_core_metric_gaps(points)
+
+        assert summary == "2026-03-30 21:00 2h inconsistent (only energy)"
+
+    def test_summarize_core_metric_gaps_splits_inconsistent_runs_by_metrics(
+        self, mock_hass, mock_auth_client
+    ):
+        """Runs with different present metrics should be summarized separately."""
+        client = FortumAPIClient(mock_hass, mock_auth_client)
+        points = [
+            self._core_point("2026-03-30T20:00:00+00:00", energy=False),
+            self._core_point("2026-03-30T21:00:00+00:00", cost=False),
+            self._core_point("2026-03-30T22:00:00+00:00"),
+            self._core_point(
+                "2026-03-30T23:00:00+00:00", energy=False, cost=False, price=False
+            ),
+        ]
+
+        summary = client._summarize_core_metric_gaps(points)
+
+        assert summary == (
+            "2026-03-30 20:00 1h inconsistent (only cost, price), "
+            "2026-03-30 21:00 1h inconsistent (only energy, price), "
+            "2026-03-30 22:00 1h present, 2026-03-30 23:00 1h missing"
+        )
+
+    def test_build_hourly_rows_skips_inconsistent_points(
+        self, mock_hass, mock_auth_client
+    ):
+        """Only points with all core metrics should produce recorder rows."""
+        client = FortumAPIClient(mock_hass, mock_auth_client)
+        points = [
+            self._core_point("2026-03-30T20:00:00+00:00"),
+            self._core_point("2026-03-30T21:00:00+00:00", energy=False),
+            self._core_point("2026-03-30T22:00:00+00:00", cost=False),
+            self._core_point("2026-03-30T23:00:00+00:00", price=False),
+        ]
+
+        rows = client._build_hourly_rows_from_points(
+            points,
+            datetime.fromisoformat("2026-03-30T00:00:00+00:00"),
+            datetime.fromisoformat("2026-03-31T00:00:00+00:00"),
+        )
+
+        expected_hours = [datetime.fromisoformat("2026-03-30T20:00:00+00:00")]
+        assert [row["start"] for row in rows.consumption] == expected_hours
+        assert [row["start"] for row in rows.cost] == expected_hours
+        assert [row["start"] for row in rows.price] == expected_hours
 
     async def test_clear_statistics_for_discovered_points_clears_all_statistic_ids(
         self, mock_hass, mock_auth_client

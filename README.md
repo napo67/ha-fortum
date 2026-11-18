@@ -78,7 +78,8 @@ For dashboard behavior and strategy options, see `docs/dashboard.md`.
 
 ## Hourly Data Semantics
 
-- The integration treats `price` presence as the existence marker for Fortum hourly core metrics (`energy`, `cost`, `price`).
+- An hour is imported only when all Fortum hourly core metrics (`energy`, `cost`, `price`) are present.
+- Hours where only some core metrics are present are skipped and logged as an `inconsistent` gap warning.
 - Missing core hours are represented in Fortum payloads as `energy: []`, `cost: null`, and `price: null`.
 - `temperatureReading` can still be present when core metrics are missing; this does not make the hour eligible for core statistics import.
 
@@ -95,6 +96,7 @@ The integration creates these regular entities:
 - **Current Month Consumption <metering_point_no>** (`sensor`, optional): Month-to-date consumption per metering point, updated by hourly statistics sync when the current-month option is enabled.
 - **Current Month Cost <metering_point_no>** (`sensor`, optional): Month-to-date cost per metering point, updated by hourly statistics sync when the current-month option is enabled.
 - **Statistics Last Sync** (`sensor`, diagnostic): Timestamp of the latest successful hourly statistics sync.
+- **Statistics Last Data <metering_point_no>** (`sensor`, diagnostic): Start of the newest hour with recorded consumption statistics per metering point. Shows how far behind Fortum data is, even when syncs succeed or fail.
 
 Additionally, it imports hourly Recorder statistics for each available metering point:
 
